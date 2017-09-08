@@ -1,96 +1,79 @@
 (ns sec-test.core
-     (:require [reagent.core :as reagent :refer [atom]]
-            [reagent.session :as session]
+  (:require
+	    [reagent.core :as r]
+	    [secretary.core :as secretary]
+	    [goog.events :as events]
+      [goog.history.EventType :as EventType]
 
-            [bidi.bidi :as bidi]
-            ;;[schema.core :as s] ;For when defining routes get tricky
-            ;;[bidi.schema]
 
-            [accountant.core :as accountant]))
+   ))
 
-(def app-routes
-  ["/"
-   [["" :index]
-    ["section-a"
-     [["" :section-a]
-      [["/item-" :item-id] :a-item]]]
-    ["section-b" :section-b]
-    ["missing-route" :missing-route]
-    [true :four-o-four]]])
+(enable-console-print!)
 
-(defmulti page-contents identity)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Vars
 
-(defmethod page-contents :index []
-  [:span
-   [:h1 "Routing example: Index"]
-   [:ul
-    [:li [:a {:href (bidi/path-for app-routes :section-a) } "Section A"]]
-    [:li [:a {:href (bidi/path-for app-routes :section-b) } "Section B"]]
-    [:li [:a {:href (bidi/path-for app-routes :missing-route) } "Missing-route"]]
-    [:li [:a {:href "/borken/link" } "Borken link"]]]])
+(def app-state (r/atom {:page :first}))
+(println "initial state" @app-state)
 
-(defmethod page-contents :section-a []
-  [:span
-   [:h1 "Routing example: Section A"]
-   [:ul (map (fn [item-id]
-               [:li {:key (str "item-" item-id)}
-                [:a {:href (bidi/path-for app-routes :a-item :item-id item-id)} "Item: " item-id]])
-             (range 1 6))]])
+(defn first []
+  [:div
+   [:h1 "First"][:br]
 
-(defmethod page-contents :a-item []
-  (let [routing-data (session/get :route)
-        item (get-in routing-data [:route-params :item-id])]
-    [:span
-     [:h1 (str "Routing example: Section A, item " item)]
-     [:p [:a {:href (bidi/path-for app-routes :section-a)} "Back to Section A"]]]))
+   [:a {:href "#/first"} "First"][:br]
+   [:a {:href "#/second"} "Second"]])
 
-(defmethod page-contents :section-b []
-  [:span
-   [:h1 "Routing example: Section B"]])
+(defn first []
+  [:div
+   [:h1 "Second"][:br]
 
-(defmethod page-contents :four-o-four []
-  "Non-existing routes go here"
-  [:span
-   [:h1 "404"]
-   [:p "What you are looking for, "]
-   [:p "I do not have."]])
+   [:a {:href "#/first"} "First"][:br]
+   [:a {:href "#/second"} "Second"]])
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Page
 
-(defmethod page-contents :default []
-  "Configured routes, missing an implementation, go here"
-  [:span
-   [:h1 "404: My bad"]
-   [:pre.verse
-    "This page should be here,
-but I never created it."]])
+(defn hook-browser-navigation! []
+  (doto (History.)
+  	(events/listen
+    	EventType/NAVIGATE
+    	(fn [event]
+   			(secretary/dispatch! (.-token event))))
+  	(.setEnabled true)))
 
-(defn page []
-  (fn []
-    (let [page (:current-page (session/get :route))]
-      [:div
-       [:p [:a {:href (bidi/path-for app-routes :index) } "Go home"]]
-       [:hr]
-       (page-contents page) ;;(1)
-       [:hr]
-       [:p "(Using "
-        [:a {:href "https://reagent-project.github.io/"} "Reagent"] ", "
-        [:a {:href "https://github.com/juxt/bidi"} "Bidi"] " & "
-        [:a {:href "https://github.com/venantius/accountant"} "Accountant"]
-        ")"]])))
+(defn app-routes []
+  (secretary/set-config! :prefix "#")
 
-(defn on-js-reload []
-  (reagent/render-component [page]
-                            (. js/document (getElementById "app"))))
+  (defroute "/first" []
+    (swap! app-state assoc :page :first))
+  (defroute "/second" []
+    (swap! app-state assoc :page :second))
+
+  (println "from app-routes" @app-state)
+  (hook-browser-navigation!))
+
+(defmulti current-page #(@app-state :page))
+(defmethod current-page :first []
+  [first])
+(defmethod current-page :second []
+  [second])
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Initialize App
+
+(defn dev-setup []
+  (when ^boolean js/goog.DEBUG
+    (enable-console-print!)
+    (println "dev mode")
+    ))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; render function
+(defn reload []
+  (r/render [current-page]
+            (.getElementById js/document "app")))
 
 (defn ^:export main []
-  (accountant/configure-navigation!
-   {:nav-handler (fn
-                   [path] ;;(1)
-                   (let [match (bidi/match-route app-routes path) ;;(2)
-                         current-page (:handler match) ;;(3)
-                         route-params (:route-params match)] ;;(4)
-                     (session/put! :route {:current-page current-page ;;(5)
-                                           :route-params route-params})))
-    :path-exists? (fn [path]
-                    (boolean (bidi/match-route app-routes path)))})
-  (accountant/dispatch-current!) ;;(6)
-  (on-js-reload))
+  (dev-setup)
+  (app-routes)
+  (reload))
